@@ -1,0 +1,1854 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zombie Apocalypse</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    overflow: hidden;
+    background: #171b1c;
+    font-family: Arial, sans-serif;
+}
+
+canvas.game {
+    display: block;
+}
+
+#hud {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    color: white;
+    z-index: 100;
+    font-size: 19px;
+    line-height: 1.6;
+    text-shadow: 2px 2px 4px black;
+    pointer-events: none;
+}
+
+#crosshair {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 28px;
+    z-index: 100;
+    pointer-events: none;
+    text-shadow: 1px 1px 3px black;
+}
+
+#healthContainer {
+    position: absolute;
+    bottom: 25px;
+    right: 25px;
+    width: 240px;
+    height: 27px;
+    background: #222;
+    border: 2px solid white;
+    z-index: 100;
+}
+
+#healthBar {
+    width: 100%;
+    height: 100%;
+    background: limegreen;
+}
+
+#healthText {
+    position: absolute;
+    bottom: 59px;
+    right: 25px;
+    color: white;
+    font-size: 16px;
+    text-shadow: 2px 2px 4px black;
+    z-index: 100;
+}
+
+#help {
+    position: absolute;
+    left: 15px;
+    bottom: 15px;
+    color: white;
+    font-size: 13px;
+    line-height: 1.5;
+    text-shadow: 2px 2px 4px black;
+    pointer-events: none;
+    z-index: 100;
+}
+
+#message {
+    position: absolute;
+    top: 75px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: white;
+    font-size: 18px;
+    text-shadow: 2px 2px 4px black;
+    z-index: 100;
+    pointer-events: none;
+}
+
+#gameOver {
+    display: none;
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.88);
+    color: white;
+    z-index: 300;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+}
+
+#gameOver h1 {
+    color: #c00;
+    font-size: 52px;
+}
+
+#restartButton {
+    padding: 14px 30px;
+    background: #760000;
+    color: white;
+    border: 1px solid white;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+</style>
+</head>
+
+<body>
+
+<div id="hud">
+    🏆 Score: <span id="score">0</span><br>
+    🔫 Ammo: <span id="ammo">10</span> / 10<br>
+    🧟 Zombies: <span id="zombieCount">0</span>
+</div>
+
+<div id="crosshair">+</div>
+
+<div id="message"></div>
+
+<div id="healthText">
+    ❤️ Gezondheid: <span id="healthValue">100</span>%
+</div>
+
+<div id="healthContainer">
+    <div id="healthBar"></div>
+</div>
+
+<div id="help">
+    WASD = bewegen | SHIFT = rennen | SPATIE = springen<br>
+    MUISKLIK = schieten | R = herladen | ESC = muis vrijgeven
+</div>
+
+<div id="gameOver">
+    <h1>GAME OVER</h1>
+    <p>Je bent door de zombies gegrepen.</p>
+    <p>Eindscore: <span id="finalScore">0</span></p>
+    <button id="restartButton">OPNIEUW SPELEN</button>
+</div>
+
+<script type="module">
+
+import * as THREE from
+"https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js";
+
+/* ==================================================
+   BASIS
+================================================== */
+
+const scene = new THREE.Scene();
+
+scene.background = new THREE.Color(0x84949a);
+
+scene.fog = new THREE.Fog(
+    0x84949a,
+    90,
+    330
+);
+
+const camera = new THREE.PerspectiveCamera(
+    75,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    700
+);
+
+camera.rotation.order = "YXZ";
+camera.position.set(0, 1.7, 0);
+
+const renderer = new THREE.WebGLRenderer({
+    antialias: true
+});
+
+renderer.setSize(
+    window.innerWidth,
+    window.innerHeight
+);
+
+renderer.setPixelRatio(
+    Math.min(window.devicePixelRatio, 2)
+);
+
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+renderer.domElement.className = "game";
+
+document.body.appendChild(renderer.domElement);
+
+/* ==================================================
+   LICHT
+================================================== */
+
+const hemisphereLight = new THREE.HemisphereLight(
+    0xc1d0d5,
+    0x393a35,
+    1.25
+);
+
+scene.add(hemisphereLight);
+
+const sun = new THREE.DirectionalLight(
+    0xfff4df,
+    2
+);
+
+sun.position.set(-60, 100, 45);
+
+sun.castShadow = true;
+
+sun.shadow.mapSize.set(2048, 2048);
+
+sun.shadow.camera.left = -120;
+sun.shadow.camera.right = 120;
+sun.shadow.camera.top = 120;
+sun.shadow.camera.bottom = -120;
+
+sun.shadow.bias = -0.0004;
+
+scene.add(sun);
+
+/* ==================================================
+   PROCEDURELE BETONTEXTUUR
+================================================== */
+
+function createConcreteTexture(baseColor) {
+
+    const canvas = document.createElement("canvas");
+
+    canvas.width = 256;
+    canvas.height = 256;
+
+    const ctx = canvas.getContext("2d");
+
+    const color = new THREE.Color(baseColor);
+
+    const r = Math.round(color.r * 255);
+    const g = Math.round(color.g * 255);
+    const b = Math.round(color.b * 255);
+
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+
+    ctx.fillRect(0, 0, 256, 256);
+
+    // Kleine betonvlekken
+    for (let i = 0; i < 1800; i++) {
+
+        const x = Math.random() * 256;
+        const y = Math.random() * 256;
+
+        const size = 1 + Math.random() * 5;
+
+        const brightness =
+            Math.random() > 0.5
+                ? 25 + Math.random() * 35
+                : -10 - Math.random() * 25;
+
+        const rr = THREE.MathUtils.clamp(
+            r + brightness,
+            0,
+            255
+        );
+
+        const gg = THREE.MathUtils.clamp(
+            g + brightness,
+            0,
+            255
+        );
+
+        const bb = THREE.MathUtils.clamp(
+            b + brightness,
+            0,
+            255
+        );
+
+        ctx.fillStyle =
+            `rgba(${rr},${gg},${bb},${0.15 + Math.random() * 0.35})`;
+
+        ctx.fillRect(x, y, size, size);
+    }
+
+    // Verticale strepen door regen en veroudering
+    for (let i = 0; i < 22; i++) {
+
+        const x = Math.random() * 256;
+        const width = 1 + Math.random() * 4;
+
+        const height = 20 + Math.random() * 160;
+
+        ctx.fillStyle = `rgba(25,27,26,${0.04 + Math.random() * 0.12})`;
+
+        ctx.fillRect(
+            x,
+            Math.random() * 100,
+            width,
+            height
+        );
+    }
+
+    // Kleine scheurtjes
+    for (let i = 0; i < 30; i++) {
+
+        const x = Math.random() * 256;
+        const y = Math.random() * 256;
+
+        ctx.strokeStyle = "rgba(25,25,25,0.2)";
+        ctx.lineWidth = 1;
+
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+
+        ctx.lineTo(
+            x + (Math.random() - 0.5) * 12,
+            y + 3 + Math.random() * 15
+        );
+
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+
+    texture.colorSpace = THREE.SRGBColorSpace;
+
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+
+    texture.repeat.set(2, 5);
+
+    return texture;
+}
+
+const concreteTextures = [
+    createConcreteTexture(0x777875),
+    createConcreteTexture(0x8c8b85),
+    createConcreteTexture(0x555754),
+    createConcreteTexture(0xb2b0a8),
+    createConcreteTexture(0x444644),
+    createConcreteTexture(0x999991)
+];
+
+const facadeMaterials = concreteTextures.map(texture => {
+
+    return new THREE.MeshStandardMaterial({
+        map: texture,
+        color: 0xffffff,
+        roughness: 0.97,
+        metalness: 0.02
+    });
+});
+
+/* ==================================================
+   GROND
+================================================== */
+
+const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(600, 600),
+    new THREE.MeshStandardMaterial({
+        color: 0x5d6259,
+        roughness: 1
+    })
+);
+
+ground.rotation.x = -Math.PI / 2;
+
+ground.receiveShadow = true;
+
+scene.add(ground);
+
+/* ==================================================
+   STRATEN
+================================================== */
+
+const roadMaterial = new THREE.MeshStandardMaterial({
+    color: 0x292b2a,
+    roughness: 1
+});
+
+function createRoad(x, z, width, depth) {
+
+    const road = new THREE.Mesh(
+        new THREE.PlaneGeometry(width, depth),
+        roadMaterial
+    );
+
+    road.rotation.x = -Math.PI / 2;
+
+    road.position.set(x, 0.025, z);
+
+    scene.add(road);
+}
+
+createRoad(0, 0, 18, 500);
+createRoad(0, 0, 500, 18);
+
+for (let i = -200; i <= 200; i += 80) {
+
+    createRoad(i, 0, 10, 500);
+
+    createRoad(0, i, 500, 10);
+}
+
+/* ==================================================
+   MATERIALEN GEBOUWEN
+================================================== */
+
+const buildings = [];
+const buildingGroups = [];
+
+const windowMaterials = [
+
+    new THREE.MeshStandardMaterial({
+        color: 0x101719,
+        roughness: 0.3,
+        metalness: 0.35
+    }),
+
+    new THREE.MeshStandardMaterial({
+        color: 0x293d48,
+        roughness: 0.22,
+        metalness: 0.65
+    }),
+
+    new THREE.MeshStandardMaterial({
+        color: 0x080a0b,
+        roughness: 0.45
+    }),
+
+    new THREE.MeshStandardMaterial({
+        color: 0x87928e,
+        roughness: 0.3,
+        metalness: 0.4
+    }),
+
+    new THREE.MeshStandardMaterial({
+        color: 0x343a3a,
+        roughness: 0.5
+    })
+];
+
+const concreteDark = new THREE.MeshStandardMaterial({
+    color: 0x464744,
+    roughness: 1
+});
+
+const concreteLight = new THREE.MeshStandardMaterial({
+    color: 0xaaa9a2,
+    roughness: 1
+});
+
+const balconyMaterial = new THREE.MeshStandardMaterial({
+    color: 0x666863,
+    roughness: 1
+});
+
+const vineMaterials = [
+
+    new THREE.MeshStandardMaterial({
+        color: 0x263d28,
+        roughness: 1
+    }),
+
+    new THREE.MeshStandardMaterial({
+        color: 0x405b35,
+        roughness: 1
+    }),
+
+    new THREE.MeshStandardMaterial({
+        color: 0x566a3d,
+        roughness: 1
+    })
+];
+
+/* ==================================================
+   GEBOUW MAKEN
+================================================== */
+
+function createBuilding(x, z, options = {}) {
+
+    const group = new THREE.Group();
+
+    // Flats zijn meestal veel hoger dan breed
+    const width = options.width ?? (10 + Math.random() * 8);
+    const depth = options.depth ?? (9 + Math.random() * 7);
+    const height = options.height ?? (32 + Math.random() * 48);
+
+    const facade =
+        facadeMaterials[
+            Math.floor(Math.random() * facadeMaterials.length)
+        ];
+
+    const bodyGeometry = new THREE.BoxGeometry(
+        width,
+        height,
+        depth
+    );
+
+    const body = new THREE.Mesh(
+        bodyGeometry,
+        facade
+    );
+
+    body.position.y = height / 2;
+
+    body.castShadow = true;
+    body.receiveShadow = true;
+
+    group.add(body);
+
+    /* ----------------------------------------------
+       RAMEN: ONREGELMATIG ZOALS OP DE FOTO
+    ---------------------------------------------- */
+
+    const columns = Math.floor(width / 1.45);
+
+    const rows = Math.floor(height / 2.35);
+
+    const spacingX = width / columns;
+
+    const spacingY = height / (rows + 1);
+
+    const windowWidth = 0.86;
+    const windowHeight = 1.35;
+
+    const frontZ = depth / 2 + 0.075;
+    const backZ = -depth / 2 - 0.075;
+
+    for (let row = 0; row < rows; row++) {
+
+        for (let col = 0; col < columns; col++) {
+
+            const wx =
+                -width / 2 + spacingX * (col + 0.5);
+
+            const wy = 1.3 + row * spacingY;
+
+            // Sommige ramen zijn donker, andere reflecteren licht
+            let material =
+                windowMaterials[
+                    Math.floor(Math.random() * windowMaterials.length)
+                ];
+
+            // Kleine variatie in de raamindeling
+            const missingWindow = Math.random() < 0.09;
+
+            if (!missingWindow) {
+
+                const windowMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(
+                        windowWidth,
+                        windowHeight,
+                        0.1
+                    ),
+                    material
+                );
+
+                windowMesh.position.set(
+                    wx,
+                    wy,
+                    frontZ
+                );
+
+                group.add(windowMesh);
+            }
+
+            // Achtergevel
+            if (Math.random() > 0.12) {
+
+                const backWindow = new THREE.Mesh(
+                    new THREE.BoxGeometry(
+                        windowWidth,
+                        windowHeight,
+                        0.1
+                    ),
+                    windowMaterials[
+                        Math.floor(Math.random() * windowMaterials.length)
+                    ]
+                );
+
+                backWindow.position.set(
+                    wx,
+                    wy,
+                    backZ
+                );
+
+                group.add(backWindow);
+            }
+
+            // Soms een uitstekende betonnen vensterbank
+            if (Math.random() > 0.6) {
+
+                const sill = new THREE.Mesh(
+                    new THREE.BoxGeometry(
+                        windowWidth + 0.2,
+                        0.09,
+                        0.22
+                    ),
+                    concreteLight
+                );
+
+                sill.position.set(
+                    wx,
+                    wy - windowHeight / 2 - 0.04,
+                    frontZ + 0.025
+                );
+
+                group.add(sill);
+            }
+        }
+    }
+
+    /* ----------------------------------------------
+       ZIJRAMEN
+    ---------------------------------------------- */
+
+    const sideColumns = Math.floor(depth / 1.7);
+
+    for (let row = 0; row < rows; row++) {
+
+        for (let col = 0; col < sideColumns; col++) {
+
+            const wz =
+                -depth / 2 +
+                depth * (col + 0.5) / sideColumns;
+
+            const wy = 1.3 + row * spacingY;
+
+            for (const side of [-1, 1]) {
+
+                if (Math.random() < 0.07) continue;
+
+                const windowMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(
+                        0.1,
+                        windowHeight,
+                        0.9
+                    ),
+                    windowMaterials[
+                        Math.floor(Math.random() * windowMaterials.length)
+                    ]
+                );
+
+                windowMesh.position.set(
+                    side * (width / 2 + 0.075),
+                    wy,
+                    wz
+                );
+
+                group.add(windowMesh);
+            }
+        }
+    }
+
+    /* ----------------------------------------------
+       BETONNEN VERDIEPINGSLIJNEN
+    ---------------------------------------------- */
+
+    for (let row = 1; row <= rows; row++) {
+
+        const floorLine = new THREE.Mesh(
+            new THREE.BoxGeometry(
+                width + 0.15,
+                0.13,
+                0.18
+            ),
+            row % 3 === 0 ? concreteLight : concreteDark
+        );
+
+        floorLine.position.set(
+            0,
+            row * spacingY + 0.15,
+            frontZ + 0.025
+        );
+
+        group.add(floorLine);
+    }
+
+    /* ----------------------------------------------
+       VERTICALE GEVELSTROKEN
+    ---------------------------------------------- */
+
+    for (let col = 0; col <= columns; col++) {
+
+        const strip = new THREE.Mesh(
+            new THREE.BoxGeometry(
+                0.13,
+                height,
+                0.16
+            ),
+            Math.random() > 0.5
+                ? concreteDark
+                : concreteLight
+        );
+
+        strip.position.set(
+            -width / 2 + col * spacingX,
+            height / 2,
+            frontZ + 0.045
+        );
+
+        group.add(strip);
+    }
+
+    /* ----------------------------------------------
+       BALKONS
+    ---------------------------------------------- */
+
+    for (let row = 2; row < rows; row++) {
+
+        // Onregelmatige balkonrijen
+        if (Math.random() > 0.3) continue;
+
+        const balconyX =
+            (Math.random() - 0.5) * width * 0.65;
+
+        const balconyY = 1.3 + row * spacingY;
+
+        const balconyWidth = 1.8 + Math.random() * 1.1;
+
+        // Balkonvloer
+        const balcony = new THREE.Mesh(
+            new THREE.BoxGeometry(
+                balconyWidth,
+                0.18,
+                1.1
+            ),
+            balconyMaterial
+        );
+
+        balcony.position.set(
+            balconyX,
+            balconyY,
+            frontZ + 0.5
+        );
+
+        group.add(balcony);
+
+        // Voorste balkonrand
+        const railing = new THREE.Mesh(
+            new THREE.BoxGeometry(
+                balconyWidth,
+                0.65,
+                0.08
+            ),
+            concreteDark
+        );
+
+        railing.position.set(
+            balconyX,
+            balconyY + 0.38,
+            frontZ + 1.05
+        );
+
+        group.add(railing);
+
+        // Zijrand links
+        for (const side of [-1, 1]) {
+
+            const sideRail = new THREE.Mesh(
+                new THREE.BoxGeometry(
+                    0.08,
+                    0.55,
+                    0.85
+                ),
+                concreteDark
+            );
+
+            sideRail.position.set(
+                balconyX + side * balconyWidth / 2,
+                balconyY + 0.32,
+                frontZ + 0.55
+            );
+
+            group.add(sideRail);
+        }
+    }
+
+    /* ----------------------------------------------
+       BESCHADIGD BETON
+    ---------------------------------------------- */
+
+    for (let i = 0; i < 18; i++) {
+
+        const patch = new THREE.Mesh(
+            new THREE.BoxGeometry(
+                0.3 + Math.random() * 1.2,
+                0.3 + Math.random() * 2.2,
+                0.035
+            ),
+            Math.random() > 0.5
+                ? concreteDark
+                : concreteLight
+        );
+
+        patch.position.set(
+            (Math.random() - 0.5) * width,
+            1.5 + Math.random() * (height - 3),
+            frontZ + 0.06
+        );
+
+        group.add(patch);
+    }
+
+    /* ----------------------------------------------
+       KLIMOP OP DE GEVEL
+    ---------------------------------------------- */
+
+    if (options.vines || Math.random() > 0.35) {
+
+        const vineCount = 12 + Math.floor(Math.random() * 20);
+
+        for (let i = 0; i < vineCount; i++) {
+
+            const vineX =
+                (Math.random() - 0.5) * width * 0.9;
+
+            const vineHeight =
+                4 + Math.random() * height * 0.75;
+
+            const vine = new THREE.Mesh(
+                new THREE.BoxGeometry(
+                    0.12 + Math.random() * 0.25,
+                    vineHeight,
+                    0.12
+                ),
+                vineMaterials[
+                    Math.floor(Math.random() * vineMaterials.length)
+                ]
+            );
+
+            vine.position.set(
+                vineX,
+                vineHeight / 2 + 1,
+                frontZ + 0.1
+            );
+
+            group.add(vine);
+
+            // Bladeren in groepjes
+            const leafCount = 8 + Math.floor(Math.random() * 10);
+
+            for (let j = 0; j < leafCount; j++) {
+
+                const leaf = new THREE.Mesh(
+                    new THREE.BoxGeometry(
+                        0.25 + Math.random() * 0.5,
+                        0.18 + Math.random() * 0.4,
+                        0.08
+                    ),
+                    vineMaterials[
+                        Math.floor(Math.random() * vineMaterials.length)
+                    ]
+                );
+
+                leaf.position.set(
+                    vineX + (Math.random() - 0.5) * 1.3,
+                    1.5 + Math.random() * vineHeight,
+                    frontZ + 0.17
+                );
+
+                group.add(leaf);
+            }
+        }
+    }
+
+    /* ----------------------------------------------
+       DAK EN TECHNISCHE OPBOUW
+    ---------------------------------------------- */
+
+    const roofHeight = 2 + Math.random() * 2;
+
+    const roofStructure = new THREE.Mesh(
+        new THREE.BoxGeometry(
+            width * 0.35,
+            roofHeight,
+            depth * 0.4
+        ),
+        concreteDark
+    );
+
+    roofStructure.position.set(
+        (Math.random() - 0.5) * width * 0.25,
+        height + roofHeight / 2,
+        0
+    );
+
+    group.add(roofStructure);
+
+    // Plaats het gebouw in de wereld
+    group.position.set(x, 0, z);
+
+    group.rotation.y =
+        Math.floor(Math.random() * 4) * Math.PI / 2;
+
+    scene.add(group);
+
+    buildingGroups.push(group);
+
+    // Botsingsbox op basis van de volledige gebouwrotatie
+    const collisionBox = new THREE.Box3().setFromObject(body);
+
+    buildings.push({
+        box: collisionBox,
+        mesh: body,
+        group
+    });
+
+    return group;
+}
+
+/* ==================================================
+   STAD GENEREREN
+================================================== */
+
+for (let i = 0; i < 85; i++) {
+
+    let x = 0;
+    let z = 0;
+
+    let attempts = 0;
+
+    do {
+
+        x = (Math.random() - 0.5) * 250;
+        z = (Math.random() - 0.5) * 250;
+
+        attempts++;
+
+    } while (
+        attempts < 100 &&
+        (
+            (Math.abs(x) < 17 && Math.abs(z) < 17) ||
+            Math.abs(x) % 80 < 14 ||
+            Math.abs(z) % 80 < 14
+        )
+    );
+
+    createBuilding(x, z);
+}
+
+/* ==================================================
+   EXTRA HOGE FLATS ZOALS OP DE FOTO
+================================================== */
+
+// Een paar hoge woontorens tussen de lagere gebouwen
+
+createBuilding(30, -45, {
+    width: 15,
+    depth: 13,
+    height: 78,
+    vines: true
+});
+
+createBuilding(-50, -70, {
+    width: 17,
+    depth: 15,
+    height: 68,
+    vines: true
+});
+
+createBuilding(60, 50, {
+    width: 14,
+    depth: 12,
+    height: 83,
+    vines: true
+});
+
+/* ==================================================
+   WAPEN
+================================================== */
+
+const gun = new THREE.Group();
+
+const gunMaterial = new THREE.MeshStandardMaterial({
+    color: 0x252827,
+    metalness: 0.7,
+    roughness: 0.35
+});
+
+const gunBody = new THREE.Mesh(
+    new THREE.BoxGeometry(0.22, 0.19, 0.58),
+    gunMaterial
+);
+
+gun.add(gunBody);
+
+const gunBarrel = new THREE.Mesh(
+    new THREE.BoxGeometry(0.09, 0.09, 0.38),
+    new THREE.MeshStandardMaterial({
+        color: 0x080909,
+        metalness: 0.8,
+        roughness: 0.25
+    })
+);
+
+gunBarrel.position.set(0, 0.02, -0.43);
+
+gun.add(gunBarrel);
+
+const gunGrip = new THREE.Mesh(
+    new THREE.BoxGeometry(0.13, 0.26, 0.14),
+    new THREE.MeshStandardMaterial({
+        color: 0x181a19,
+        roughness: 0.9
+    })
+);
+
+gunGrip.position.set(0, -0.17, 0.1);
+
+gun.add(gunGrip);
+
+gun.position.set(0.42, -0.34, -0.8);
+
+camera.add(gun);
+
+/* ==================================================
+   GAMESTATUS
+================================================== */
+
+let score = 0;
+let hp = 100;
+
+let ammo = 10;
+const maxAmmo = 10;
+
+let isPlaying = true;
+let gameOver = false;
+
+let lastShot = 0;
+
+const zombies = [];
+const bullets = [];
+
+const keys = {};
+
+let yaw = 0;
+let pitch = 0;
+
+// FYSICA IN EENHEDEN PER SECONDE
+let velocityY = 0;
+
+const gravity = -19.6;
+const jumpStrength = 7.0;
+
+let canJump = true;
+
+const groundLevel = 1.7;
+const playerRadius = 0.42;
+
+/* ==================================================
+   HUD
+================================================== */
+
+function updateHUD() {
+
+    document.getElementById("score").textContent = score;
+
+    document.getElementById("ammo").textContent = ammo;
+
+    document.getElementById("zombieCount").textContent =
+        zombies.length;
+
+    document.getElementById("healthValue").textContent =
+        Math.ceil(Math.max(0, hp));
+}
+
+function updateHealthBar() {
+
+    const bar = document.getElementById("healthBar");
+
+    const health = THREE.MathUtils.clamp(hp, 0, 100);
+
+    bar.style.width = health + "%";
+
+    if (health > 60) {
+        bar.style.background = "limegreen";
+    } else if (health > 30) {
+        bar.style.background = "orange";
+    } else {
+        bar.style.background = "red";
+    }
+
+    document.getElementById("healthValue").textContent =
+        Math.ceil(health);
+}
+
+function showMessage(text, duration = 1300) {
+
+    const element = document.getElementById("message");
+
+    element.textContent = text;
+
+    setTimeout(() => {
+
+        if (element.textContent === text) {
+            element.textContent = "";
+        }
+
+    }, duration);
+}
+
+/* ==================================================
+   ZOMBIES
+================================================== */
+
+function spawnZombie() {
+
+    if (gameOver) return;
+
+    const zombie = new THREE.Group();
+
+    const skinMaterial = new THREE.MeshStandardMaterial({
+        color: Math.random() > 0.5 ? 0x65765b : 0x777b65,
+        roughness: 1
+    });
+
+    const clothesMaterial = new THREE.MeshStandardMaterial({
+        color: [
+            0x302d2d,
+            0x4c3e3a,
+            0x424b43,
+            0x555555,
+            0x242d35
+        ][Math.floor(Math.random() * 5)],
+        roughness: 1
+    });
+
+    const pantsMaterial = new THREE.MeshStandardMaterial({
+        color: 0x292929,
+        roughness: 1
+    });
+
+    // Lichaam
+    const torso = new THREE.Mesh(
+        new THREE.BoxGeometry(0.75, 1.15, 0.38),
+        clothesMaterial
+    );
+
+    torso.position.y = 1.9;
+
+    zombie.add(torso);
+
+    // Hoofd
+    const head = new THREE.Mesh(
+        new THREE.BoxGeometry(0.45, 0.5, 0.43),
+        skinMaterial
+    );
+
+    head.position.y = 2.75;
+
+    zombie.add(head);
+
+    // Ogen
+    const eyeMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff2525
+    });
+
+    for (const side of [-1, 1]) {
+
+        const eye = new THREE.Mesh(
+            new THREE.BoxGeometry(0.07, 0.06, 0.035),
+            eyeMaterial
+        );
+
+        eye.position.set(
+            side * 0.11,
+            2.8,
+            -0.22
+        );
+
+        zombie.add(eye);
+    }
+
+    // Benen
+    for (const side of [-1, 1]) {
+
+        const leg = new THREE.Mesh(
+            new THREE.BoxGeometry(0.25, 0.75, 0.28),
+            pantsMaterial
+        );
+
+        leg.position.set(
+            side * 0.2,
+            0.65,
+            0
+        );
+
+        zombie.add(leg);
+    }
+
+    // Armen
+    for (const side of [-1, 1]) {
+
+        const arm = new THREE.Mesh(
+            new THREE.BoxGeometry(0.2, 0.9, 0.22),
+            skinMaterial
+        );
+
+        arm.position.set(
+            side * 0.48,
+            1.95,
+            -0.08
+        );
+
+        arm.rotation.z = side * -0.3;
+
+        zombie.add(arm);
+    }
+
+    // Zombies verschijnen op een redelijke afstand
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 25 + Math.random() * 40;
+
+    let spawnX = camera.position.x + Math.sin(angle) * distance;
+    let spawnZ = camera.position.z + Math.cos(angle) * distance;
+
+    spawnX = THREE.MathUtils.clamp(spawnX, -235, 235);
+    spawnZ = THREE.MathUtils.clamp(spawnZ, -235, 235);
+
+    zombie.position.set(spawnX, 0, spawnZ);
+
+    zombie.userData.speed = 1.0 + Math.random() * 0.45;
+    zombie.userData.attackCooldown = 0;
+    zombie.userData.phase = Math.random() * 6;
+
+    scene.add(zombie);
+
+    zombies.push(zombie);
+
+    updateHUD();
+}
+
+for (let i = 0; i < 15; i++) {
+    spawnZombie();
+}
+
+/* ==================================================
+   BOTSINGEN
+================================================== */
+
+function collidesWithBuilding(position) {
+
+    const playerBox = new THREE.Box3(
+        new THREE.Vector3(
+            position.x - playerRadius,
+            0,
+            position.z - playerRadius
+        ),
+        new THREE.Vector3(
+            position.x + playerRadius,
+            position.y + 0.2,
+            position.z + playerRadius
+        )
+    );
+
+    for (const building of buildings) {
+
+        if (playerBox.intersectsBox(building.box)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function outsideWorld(position) {
+
+    return (
+        Math.abs(position.x) > 245 ||
+        Math.abs(position.z) > 245
+    );
+}
+
+/* ==================================================
+   BEWEGING EN NORMAAL SPRINGEN
+================================================== */
+
+function movePlayer(delta) {
+
+    const speed = keys["shift"] ? 9.0 : 4.8;
+
+    // Een normale sprong van ongeveer 1,25 meter
+    if (keys[" "] && canJump) {
+
+        velocityY = jumpStrength;
+
+        canJump = false;
+    }
+
+    // Bewegingsrichting is gebaseerd op de horizontale kijkrichting
+    const forward = new THREE.Vector3(
+        -Math.sin(yaw),
+        0,
+        -Math.cos(yaw)
+    );
+
+    const right = new THREE.Vector3(
+        Math.cos(yaw),
+        0,
+        -Math.sin(yaw)
+    );
+
+    const move = new THREE.Vector3();
+
+    if (keys["w"]) move.add(forward);
+    if (keys["s"]) move.sub(forward);
+    if (keys["d"]) move.add(right);
+    if (keys["a"]) move.sub(right);
+
+    if (move.lengthSq() > 0) {
+
+        move.normalize();
+
+        move.multiplyScalar(speed * delta);
+
+        // X-as afzonderlijk controleren
+        const nextX = camera.position.clone();
+
+        nextX.x += move.x;
+
+        if (
+            !collidesWithBuilding(nextX) &&
+            !outsideWorld(nextX)
+        ) {
+            camera.position.x = nextX.x;
+        }
+
+        // Z-as afzonderlijk controleren
+        const nextZ = camera.position.clone();
+
+        nextZ.z += move.z;
+
+        if (
+            !collidesWithBuilding(nextZ) &&
+            !outsideWorld(nextZ)
+        ) {
+            camera.position.z = nextZ.z;
+        }
+    }
+
+    // Eenvoudige zwaartekracht
+    velocityY += gravity * delta;
+
+    camera.position.y += velocityY * delta;
+
+    // Grondniveau
+    if (camera.position.y <= groundLevel) {
+
+        camera.position.y = groundLevel;
+
+        velocityY = 0;
+
+        canJump = true;
+    }
+}
+
+/* ==================================================
+   SCHIETEN
+================================================== */
+
+const bulletGeometry = new THREE.SphereGeometry(
+    0.075,
+    8,
+    8
+);
+
+const bulletMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffdd55
+});
+
+function shoot() {
+
+    if (!isPlaying || gameOver) return;
+
+    if (document.pointerLockElement !== renderer.domElement) {
+
+        renderer.domElement.requestPointerLock();
+
+        return;
+    }
+
+    if (ammo <= 0) {
+
+        showMessage("Geen kogels! Druk op R.");
+
+        return;
+    }
+
+    const now = performance.now();
+
+    if (now - lastShot < 180) return;
+
+    lastShot = now;
+
+    ammo--;
+
+    updateHUD();
+
+    // Terugslag van het wapen
+    gun.position.z = -0.65;
+
+    setTimeout(() => {
+
+        gun.position.z = -0.8;
+
+    }, 65);
+
+    const bullet = new THREE.Mesh(
+        bulletGeometry,
+        bulletMaterial
+    );
+
+    const direction = new THREE.Vector3();
+
+    camera.getWorldDirection(direction);
+
+    bullet.position.copy(camera.position);
+
+    bullet.position.add(
+        direction.clone().multiplyScalar(1)
+    );
+
+    bullet.userData.velocity =
+        direction.multiplyScalar(65);
+
+    bullet.userData.life = 2;
+
+    scene.add(bullet);
+
+    bullets.push(bullet);
+}
+
+/* ==================================================
+   HERLADEN
+================================================== */
+
+function reload() {
+
+    if (!isPlaying || gameOver) return;
+
+    if (ammo === maxAmmo) return;
+
+    ammo = maxAmmo;
+
+    updateHUD();
+
+    showMessage("Wapen herladen!");
+}
+
+/* ==================================================
+   KOGELS EN RAKEN
+================================================== */
+
+function updateBullets(delta) {
+
+    for (let i = bullets.length - 1; i >= 0; i--) {
+
+        const bullet = bullets[i];
+
+        bullet.position.addScaledVector(
+            bullet.userData.velocity,
+            delta
+        );
+
+        bullet.userData.life -= delta;
+
+        let removed = false;
+
+        // Controleer gebouwen
+        for (const building of buildings) {
+
+            if (building.box.containsPoint(bullet.position)) {
+
+                scene.remove(bullet);
+
+                bullets.splice(i, 1);
+
+                removed = true;
+
+                break;
+            }
+        }
+
+        if (removed) continue;
+
+        // Controleer zombies
+        for (let j = zombies.length - 1; j >= 0; j--) {
+
+            const zombie = zombies[j];
+
+            const target = zombie.position.clone();
+
+            target.y += 1.5;
+
+            if (bullet.position.distanceTo(target) < 1.3) {
+
+                scene.remove(zombie);
+
+                zombies.splice(j, 1);
+
+                scene.remove(bullet);
+
+                bullets.splice(i, 1);
+
+                score++;
+
+                updateHUD();
+
+                spawnZombie();
+
+                removed = true;
+
+                break;
+            }
+        }
+
+        if (removed) continue;
+
+        if (
+            bullet.userData.life <= 0 ||
+            bullet.position.distanceTo(camera.position) > 120
+        ) {
+
+            scene.remove(bullet);
+
+            bullets.splice(i, 1);
+        }
+    }
+}
+
+/* ==================================================
+   ZOMBIES ACHTERVOLGEN
+================================================== */
+
+function updateZombies(delta) {
+
+    for (const zombie of zombies) {
+
+        const direction = new THREE.Vector3(
+            camera.position.x - zombie.position.x,
+            0,
+            camera.position.z - zombie.position.z
+        );
+
+        const distance = direction.length();
+
+        if (distance > 0.001) {
+
+            direction.normalize();
+
+            zombie.rotation.y = Math.atan2(
+                direction.x,
+                direction.z
+            );
+
+            if (distance > 1.5) {
+
+                const step = zombie.userData.speed * delta;
+
+                const nextPosition = zombie.position.clone();
+
+                nextPosition.x += direction.x * step;
+                nextPosition.z += direction.z * step;
+
+                const zombieBox = new THREE.Box3(
+                    new THREE.Vector3(
+                        nextPosition.x - 0.35,
+                        0,
+                        nextPosition.z - 0.35
+                    ),
+                    new THREE.Vector3(
+                        nextPosition.x + 0.35,
+                        3,
+                        nextPosition.z + 0.35
+                    )
+                );
+
+                let blocked = false;
+
+                for (const building of buildings) {
+
+                    if (zombieBox.intersectsBox(building.box)) {
+
+                        blocked = true;
+
+                        break;
+                    }
+                }
+
+                if (!blocked) {
+
+                    zombie.position.x = nextPosition.x;
+
+                    zombie.position.z = nextPosition.z;
+                }
+            }
+        }
+
+        // Aanvallen
+        zombie.userData.attackCooldown -= delta;
+
+        if (
+            distance < 1.8 &&
+            zombie.userData.attackCooldown <= 0
+        ) {
+
+            hp -= 8;
+
+            zombie.userData.attackCooldown = 0.8;
+
+            updateHealthBar();
+
+            showMessage("Je wordt aangevallen!");
+
+            if (hp <= 0) {
+
+                hp = 0;
+
+                updateHealthBar();
+
+                endGame();
+
+                return;
+            }
+        }
+
+        // Kleine beweging tijdens het lopen
+        zombie.userData.phase += delta * 5;
+
+        zombie.position.y =
+            Math.abs(Math.sin(zombie.userData.phase)) * 0.04;
+    }
+}
+
+/* ==================================================
+   DAG EN NACHT
+================================================== */
+
+let dayTime = 0;
+
+function updateDayNight(delta) {
+
+    dayTime += delta * 0.025;
+
+    const daylight = (Math.sin(dayTime) + 1) / 2;
+
+    const sky = new THREE.Color();
+
+    sky.setHSL(
+        0.58,
+        0.22,
+        0.12 + daylight * 0.42
+    );
+
+    scene.background.copy(sky);
+
+    scene.fog.color.copy(sky);
+
+    sun.intensity = 0.2 + daylight * 1.8;
+
+    hemisphereLight.intensity = 0.3 + daylight * 0.9;
+}
+
+/* ==================================================
+   GAME OVER
+================================================== */
+
+function endGame() {
+
+    if (gameOver) return;
+
+    gameOver = true;
+
+    isPlaying = false;
+
+    if (document.pointerLockElement) {
+        document.exitPointerLock();
+    }
+
+    document.getElementById("finalScore").textContent = score;
+
+    document.getElementById("gameOver").style.display = "flex";
+}
+
+document.getElementById("restartButton").addEventListener(
+    "click",
+    () => location.reload()
+);
+
+/* ==================================================
+   BESTURING
+================================================== */
+
+document.addEventListener("keydown", event => {
+
+    const key = event.key.toLowerCase();
+
+    keys[key] = true;
+
+    if (key === " " && isPlaying) {
+        event.preventDefault();
+    }
+
+    if (key === "r") {
+        reload();
+    }
+});
+
+document.addEventListener("keyup", event => {
+
+    keys[event.key.toLowerCase()] = false;
+});
+
+// Rondkijken met de muis
+document.addEventListener("mousemove", event => {
+
+    if (
+        document.pointerLockElement !== renderer.domElement ||
+        !isPlaying ||
+        gameOver
+    ) {
+        return;
+    }
+
+    yaw -= event.movementX * 0.002;
+
+    pitch -= event.movementY * 0.002;
+
+    pitch = THREE.MathUtils.clamp(
+        pitch,
+        -Math.PI / 2 + 0.02,
+        Math.PI / 2 - 0.02
+    );
+
+    camera.rotation.y = yaw;
+
+    camera.rotation.x = pitch;
+});
+
+// Linkermuisknop: schieten of muis vastzetten
+document.addEventListener("mousedown", event => {
+
+    if (event.button !== 0) return;
+
+    if (
+        document.pointerLockElement !== renderer.domElement
+    ) {
+
+        if (isPlaying && !gameOver) {
+
+            renderer.domElement.requestPointerLock();
+        }
+
+        return;
+    }
+
+    shoot();
+});
+
+// Rechtermuisknop niet laten scrollen
+document.addEventListener("contextmenu", event => {
+    event.preventDefault();
+});
+
+// Bij ESC kan de muis opnieuw worden vastgezet door te klikken
+document.addEventListener("pointerlockchange", () => {
+
+    if (
+        document.pointerLockElement !== renderer.domElement &&
+        isPlaying &&
+        !gameOver
+    ) {
+
+        showMessage("Klik in het spel om weer rond te kijken.");
+    }
+});
+
+/* ==================================================
+   GAME LOOP
+================================================== */
+
+const clock = new THREE.Clock();
+
+function animate() {
+
+    requestAnimationFrame(animate);
+
+    const delta = Math.min(clock.getDelta(), 0.05);
+
+    if (isPlaying && !gameOver) {
+
+        movePlayer(delta);
+
+        updateBullets(delta);
+
+        updateZombies(delta);
+
+        updateDayNight(delta);
+    }
+
+    renderer.render(scene, camera);
+}
+
+animate();
+
+/* ==================================================
+   VENSTER AANPASSEN
+================================================== */
+
+window.addEventListener("resize", () => {
+
+    camera.aspect =
+        window.innerWidth / window.innerHeight;
+
+    camera.updateProjectionMatrix();
+
+    renderer.setSize(
+        window.innerWidth,
+        window.innerHeight
+    );
+
+    renderer.setPixelRatio(
+        Math.min(window.devicePixelRatio, 2)
+    );
+});
+
+updateHUD();
+
+updateHealthBar();
+
+</script>
+</body>
+</html>
